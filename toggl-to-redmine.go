@@ -14,145 +14,141 @@ import "flag"
 import "os"
 
 func main() {
-    boolRun := flag.Bool("run", false, "Send TimeEntries to redmine")
-    flag.Parse()
+	boolRun := flag.Bool("run", false, "Send TimeEntries to redmine")
+	flag.Parse()
 
-    args := flag.Args()
-    if (len(args) != 1) {
-      panic("Date argument is missing")
-    }
+	args := flag.Args()
+	if len(args) != 1 {
+		panic("Date argument is missing")
+	}
 
-    location, err := time.LoadLocation("UTC")
-    if err != nil {
-       panic(err)
-    }
+	location, err := time.LoadLocation("UTC")
+	if err != nil {
+		panic(err)
+	}
 
-    parsedDateArgument, err := time.ParseInLocation("2006-01-02", args[0], location)
-    if err != nil {
-       panic(err)
-    }
+	parsedDateArgument, err := time.ParseInLocation("2006-01-02", args[0], location)
+	if err != nil {
+		panic(err)
+	}
 
-  year, err := strconv.Atoi(parsedDateArgument.Format("2006"))
-  if err != nil {
-  	panic(err);
-  }
+	year, err := strconv.Atoi(parsedDateArgument.Format("2006"))
+	if err != nil {
+		panic(err)
+	}
 
-  month := parsedDateArgument.Month();
+	month := parsedDateArgument.Month()
 
-  day, err := strconv.Atoi(parsedDateArgument.Format("02"))
-  if err != nil {
-  	panic(err);
-  }
+	day, err := strconv.Atoi(parsedDateArgument.Format("02"))
+	if err != nil {
+		panic(err)
+	}
 
-  togglApiKey := os.Getenv("T2R_TOGGL_API_KEY")
-  if (0 == len(togglApiKey)) {
-    panic("Env var T2R_TOGGL_API_KEY has not been set")
-  }
+	togglApiKey := os.Getenv("T2R_TOGGL_API_KEY")
+	if 0 == len(togglApiKey) {
+		panic("Env var T2R_TOGGL_API_KEY has not been set")
+	}
 
-  client := gotoggl.NewClient(togglApiKey);
-  service := client.TimeEntries
-  start := time.Date(year, month, day,  0,  0, 0, 0, location)
-  end   := time.Date(year, month, day, 23, 59, 0, 0, location)
+	client := gotoggl.NewClient(togglApiKey)
+	service := client.TimeEntries
+	start := time.Date(year, month, day, 0, 0, 0, 0, location)
+	end := time.Date(year, month, day, 23, 59, 0, 0, location)
 
-  fmt.Printf("Search for time entries on " + parsedDateArgument.Format("2006-01-02") + "\n")
+	fmt.Printf("Search for time entries on " + parsedDateArgument.Format("2006-01-02") + "\n")
 
-  timeEntries, err := service.Range(start, end);
-  if err != nil {
-     panic(err)
-  }
+	timeEntries, err := service.Range(start, end)
+	if err != nil {
+		panic(err)
+	}
 
-  redmineEndpoint := os.Getenv("T2R_REDMINE_ENDPOINT")
-  if (0 == len(redmineEndpoint)) {
-    panic("Env var T2R_REDMINE_ENDPOINT has not been set")
-  }
+	redmineEndpoint := os.Getenv("T2R_REDMINE_ENDPOINT")
+	if 0 == len(redmineEndpoint) {
+		panic("Env var T2R_REDMINE_ENDPOINT has not been set")
+	}
 
-  redmineApiKey := os.Getenv("T2R_REDMINE_API_KEY")
-  if (0 == len(redmineApiKey)) {
-    panic("Env var T2R_REDMINE_API_KEY has not been set")
-  }
+	redmineApiKey := os.Getenv("T2R_REDMINE_API_KEY")
+	if 0 == len(redmineApiKey) {
+		panic("Env var T2R_REDMINE_API_KEY has not been set")
+	}
 
-  togglProjectIdString := os.Getenv("T2R_TOGGL_PROJECT_ID")
-  if (0 == len(togglProjectIdString)) {
-    panic("Env var T2R_TOGGL_PROJECT_ID has not been set")
-  }
+	togglProjectIdString := os.Getenv("T2R_TOGGL_PROJECT_ID")
+	if 0 == len(togglProjectIdString) {
+		panic("Env var T2R_TOGGL_PROJECT_ID has not been set")
+	}
 
-  togglProjectId, err := strconv.Atoi(togglProjectIdString)
-  if err != nil {
-  	panic(err);
-  }
+	togglProjectId, err := strconv.Atoi(togglProjectIdString)
+	if err != nil {
+		panic(err)
+	}
 
-      redmineClient := redmine.NewClient(redmineEndpoint, redmineApiKey)
+	redmineClient := redmine.NewClient(redmineEndpoint, redmineApiKey)
 
+	activities, err := redmineClient.TimeEntryActivities()
+	if err != nil {
+		panic(err)
+	}
 
-      activities, err := redmineClient.TimeEntryActivities()
-      if err != nil {
-         panic(err)
-      }
+	activitiesArray := make(map[string]int)
+	for _, activity := range activities {
+		activitiesArray[activity.Name] = activity.Id
+	}
 
-      activitiesArray := make(map[string]int)
-      for _, activity := range activities {
-         activitiesArray[activity.Name] = activity.Id
-      }
+	var totalHours float32
 
-  var totalHours float32
+	for _, timeEntry := range timeEntries {
+		if timeEntry.ProjectId != int(togglProjectId) {
+			continue
+		}
 
-  for _, timeEntry := range timeEntries {
-    if (timeEntry.ProjectId != int(togglProjectId)) {
-      continue;
-    }
+		var issueId string
+		var comment string
+		r := regexp.MustCompile(`(?P<Ticket>\d+).*-(?P<Comment>.*)?`)
+		result := r.FindStringSubmatch(timeEntry.Description)
+		if 0 == len(result) {
+			r := regexp.MustCompile(`(?P<Ticket>\d+).*`)
+			result := r.FindStringSubmatch(timeEntry.Description)
+			if 0 == len(result) {
+				panic("Issue number not found : " + timeEntry.Description)
+			} else {
+				issueId = result[1]
+			}
+		} else {
+			issueId = result[1]
+			comment = strings.TrimSpace(result[2])
+		}
 
-    var issueId string
-    var comment string
-    r := regexp.MustCompile(`(?P<Ticket>\d+).*-(?P<Comment>.*)?`)
-    result :=  r.FindStringSubmatch(timeEntry.Description)
-    if (0 == len(result)) {
-      r := regexp.MustCompile(`(?P<Ticket>\d+).*`)
-      result :=  r.FindStringSubmatch(timeEntry.Description)
-      if (0 == len(result)) {
-        panic("Issue number not found : " + timeEntry.Description)
-      } else {
-        issueId = result[1]
-      }
-    } else {
-      issueId = result[1]
-      comment = strings.TrimSpace(result[2])
-    }
+		activityId := findActivityId(activitiesArray, timeEntry.Tags)
+		if activityId == 0 {
+			panic("No activity found in tags" + fmt.Sprintf("%+v", timeEntry.Tags) + " for " + timeEntry.Description + "\n")
+		}
 
- 
-       activityId := findActivityId(activitiesArray, timeEntry.Tags)
-       if (activityId == 0) {
-         panic("No activity found in tags" + fmt.Sprintf("%+v", timeEntry.Tags) + " for " + timeEntry.Description + "\n")
-       }
+		aa := TimeEntryRequestParameters{
+			IssueId:    issueId,
+			Hours:      float32(timeEntry.Duration.Hours()),
+			SpentOn:    timeEntry.Start.Format("2006-01-02"),
+			ActivityId: fmt.Sprint(activityId),
+			Comment:    comment,
+		}
 
-       aa := TimeEntryRequestParameters{
-         IssueId: issueId,
-         Hours: float32(timeEntry.Duration.Hours()),
-         SpentOn: timeEntry.Start.Format("2006-01-02"),
-         ActivityId: fmt.Sprint(activityId),
-         Comment: comment,
-       }
+		totalHours = totalHours + float32(timeEntry.Duration.Hours())
 
-       totalHours = totalHours + float32(timeEntry.Duration.Hours())
+		fmt.Printf("%s\n", displayableEntry(aa))
 
-       fmt.Printf("%s\n", displayableEntry(aa))
-
-       if (*boolRun) {
-         tre, err := CreateTimeEntry(redmineClient, redmineEndpoint, redmineApiKey, aa)
-         if err != nil {
-           panic(err)
-         }
-         fmt.Printf("Time entry %d created\n", tre.Id)
-       }
-  }
-  fmt.Printf("Total hours : %f\n", totalHours)
+		if *boolRun {
+			tre, err := CreateTimeEntry(redmineClient, redmineEndpoint, redmineApiKey, aa)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Printf("Time entry %d created\n", tre.Id)
+		}
+	}
+	fmt.Printf("Total hours : %f\n", totalHours)
 
 }
 
 type errorsResult struct {
 	Errors []string `json:"errors"`
 }
-
-
 
 type timeEntryResult struct {
 	TimeEntry TimeEntry `json:"time_entry"`
@@ -163,43 +159,41 @@ type timeEntryRequest struct {
 }
 
 type TimeEntry struct {
-	Id           int    `json:"id"`
+	Id int `json:"id"`
 }
 
 type TimeEntryRequestParameters struct {
-	IssueId          string     `json:"issue_id"`
-	SpentOn          string  `json:"spent_on"`
-	Hours            float32     `json:"hours"`
-	ActivityId       string  `json:"activity_id"`
-        Comment          string `json:"comments"`
+	IssueId    string  `json:"issue_id"`
+	SpentOn    string  `json:"spent_on"`
+	Hours      float32 `json:"hours"`
+	ActivityId string  `json:"activity_id"`
+	Comment    string  `json:"comments"`
 }
 
-
-func findActivityId(activitiesArray map[string]int, tags []string) (int) {
-       for _, tag := range tags {
-         i := activitiesArray[tag]
-         if (i != 0) {
-           return i
-         }
-      }
-      return 0
+func findActivityId(activitiesArray map[string]int, tags []string) int {
+	for _, tag := range tags {
+		i := activitiesArray[tag]
+		if i != 0 {
+			return i
+		}
+	}
+	return 0
 }
 
-func displayableEntry(timeEntry TimeEntryRequestParameters) (string) {
+func displayableEntry(timeEntry TimeEntryRequestParameters) string {
 	s, err := json.Marshal(timeEntry)
 	if err != nil {
 		//return nil, err
 	}
-        so := fmt.Sprintf("%s", s)
-        return so
+	so := fmt.Sprintf("%s", s)
+	return so
 }
 
 func CreateTimeEntry(c *redmine.Client, endpoint string, apiKey string, aa TimeEntryRequestParameters) (*TimeEntry, error) {
 
-       bb := timeEntryRequest{
-         TimeEntry: aa,
-       }
-
+	bb := timeEntryRequest{
+		TimeEntry: aa,
+	}
 
 	s, err := json.Marshal(bb)
 	if err != nil {
