@@ -93,6 +93,18 @@ func main() {
 		activitiesArray[activity.Name] = activity.Id
 	}
 
+        filter := redmine.NewFilter()
+        filter.AddPair("user_id", "me")
+        filter.AddPair("spent_on", start.Format("2006-01-02"))
+        existingTimeEntries, err := redmineClient.TimeEntriesWithFilter(*filter)
+	if err != nil {
+		panic(err)
+	}
+
+        if (0 != len(existingTimeEntries)) {
+          panic("There is already existing time entries for this day")
+        }
+
 	var totalHours float32
 
 	for _, timeEntry := range timeEntries {
