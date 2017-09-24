@@ -9,6 +9,13 @@ Script to copy time entries from toggl to redmine.
 * date : format : `YYYY-MM-DD`
 * `--run` : time entries will only be sent to redmine if this flag is activated.
 
+## Environment variables
+
+* `T2R_TOGGL_API_KEY` : your toggl api key
+* `T2R_TOGGL_PROJECT_ID` : a projet id on toggl to filter on
+* `T2R_REDMINE_ENDPOINT` : the endpoint of your redmine instance
+* `T2R_REDMINE_API_KEY` : your redmine api key
+
 ## Toggl time entries format
 
 ### Basic entry
@@ -24,7 +31,7 @@ The first word of the toggl description must be redmine's issue number.
 If there is no dash on the description, the part after the issue number will not be used.
 When there is a dash, the part after the dash will be used has comment on redmine's time entry.
 
-### Activity
+### Activity
 
 You must add a tag on toggl time entry that as the exact same value as the activity on redmine.
 
