@@ -2,7 +2,7 @@ package main
 
 import "fmt"
 import "time"
-import "github.com/roessland/gotoggl"
+import "./gotoggl"
 import "github.com/mattn/go-redmine"
 import "encoding/json"
 import "net/http"
