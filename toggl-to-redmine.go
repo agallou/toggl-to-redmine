@@ -12,6 +12,7 @@ import "strconv"
 import "regexp"
 import "flag"
 import "os"
+import "crypto/tls"
 
 func main() {
 	boolRun := flag.Bool("run", false, "Send TimeEntries to redmine")
@@ -75,6 +76,10 @@ func main() {
 	if 0 == len(togglProjectIdString) {
 		panic("Env var T2R_TOGGL_PROJECT_ID has not been set")
 	}
+
+        // on évite une erreur x509: certificate signed by unknown authority
+        // mais ça serait mieux de passer par une variable d'environnement
+        http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
 	togglProjectId, err := strconv.Atoi(togglProjectIdString)
 	if err != nil {
