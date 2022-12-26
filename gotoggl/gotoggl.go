@@ -17,7 +17,7 @@ var _ = time.Time{}
 var _ = fmt.Print
 
 const (
-	TogglApi   = "https://www.toggl.com/api/v8/"
+	TogglApi   = "https://api.track.toggl.com/api/v9/"
 	ReportsApi = "https://toggl.com/reports/api/v2/"
 	UserAgent  = "github.com/roessland/gotoggl"
 )
@@ -87,7 +87,7 @@ func (tes *TimeEntriesService) Range(start, end time.Time) ([]TimeEntry, error) 
 	timeEntries := []TimeEntry{}
 	t0 := start.Format(time.RFC3339)
 	t1 := end.Format(time.RFC3339)
-	path := fmt.Sprintf("time_entries?start_date=%s&end_date=%s", t0, t1)
+	path := fmt.Sprintf("me/time_entries?start_date=%s&end_date=%s", t0, t1)
 	err := tes.client.GET(path, &timeEntries)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't get time entries: %v\n", err)
