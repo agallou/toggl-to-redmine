@@ -1,0 +1,1 @@
+docker build -t toggl-to-redmine-build . && docker run --rm -v "$PWD":/usr/src/toggl-to-redmine -w /usr/src/toggl-to-redmine toggl-to-redmine-build go build -v

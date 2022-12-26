@@ -35,3 +35,11 @@ When there is a dash, the part after the dash will be used has comment on redmin
 
 You must add a tag on toggl time entry that as the exact same value as the activity on redmine.
 
+## Dev
+
+### Build
+
+Run 
+```
+./build
+```
