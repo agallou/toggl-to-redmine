@@ -88,16 +88,6 @@ func main() {
 
 	redmineClient := redmine.NewClient(redmineEndpoint, redmineApiKey)
 
-	activities, err := redmineClient.TimeEntryActivities()
-	if err != nil {
-		panic(err)
-	}
-
-	activitiesArray := make(map[string]int)
-	for _, activity := range activities {
-		activitiesArray[activity.Name] = activity.Id
-	}
-
         filter := redmine.NewFilter()
         filter.AddPair("user_id", "me")
         filter.AddPair("spent_on", start.Format("2006-01-02"))
@@ -133,6 +123,33 @@ func main() {
 			issueId = result[1]
 			comment = strings.TrimSpace(result[2])
 		}
+
+                issueIdInt, err := strconv.Atoi(issueId)
+                if err != nil {
+               		panic(err)
+               	}
+
+
+                issueForTimeEntry, err := redmineClient.Issue(issueIdInt)
+                if err != nil {
+               		panic(err)
+               	}
+
+
+                project, err := GetProject(redmineClient, redmineEndpoint, redmineApiKey, issueForTimeEntry.Project.Id)
+			if err != nil {
+				panic(err)
+			}
+	
+	activitiesArray := make(map[string]int)
+	for _, activity := range project.TimeEntryActivities {
+                if (0 != activitiesArray[activity.Name] && activity.Id < activitiesArray[activity.Name]) {
+                   	continue
+		}
+
+   		activitiesArray[activity.Name] = activity.Id
+	}
+
 
 		activityId := findActivityId(activitiesArray, timeEntry.Tags)
 		if activityId == 0 {
@@ -245,3 +262,50 @@ func CreateTimeEntry(c *redmine.Client, endpoint string, apiKey string, aa TimeE
 	}
 	return &r.TimeEntry, nil
 }
+
+
+type RTimeEntryActivity struct {
+	Id        int    `json:"id"`
+	Name      string `json:"name"`
+}
+
+type RProject struct {
+	Id           int            `json:"id"`
+        TimeEntryActivities []*RTimeEntryActivity `json:"time_entry_activities"`
+}
+
+type ProjectResult struct {
+	Project RProject `json:"project"`
+}
+
+
+func GetProject(c *redmine.Client, endpoint string, apiKey string, projectId int) (*RProject, error) {
+
+	res, err := http.Get(endpoint+"/projects/" + strconv.Itoa(projectId) + ".json?include=time_entry_activities&key="+apiKey)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	decoder := json.NewDecoder(res.Body)
+        var r ProjectResult
+	if res.StatusCode != 200 {
+		var er errorsResult
+		err = decoder.Decode(&er)
+		if err == nil {
+			err = errors.New(strings.Join(er.Errors, "\n"))
+		}
+	} else {
+		err = decoder.Decode(&r)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r.Project, nil
+}
+
+
