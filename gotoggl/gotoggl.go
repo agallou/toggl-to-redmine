@@ -7,8 +7,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strconv"
 	"time"
+        "strings"
+        "io"
 )
 
 var _ = json.Unmarshal
@@ -22,38 +23,18 @@ const (
 	UserAgent  = "github.com/roessland/gotoggl"
 )
 
-// Duration encapsulates the standard Duration in an anonymous field. Toggl
-// returns durations in seconds, but time.Duration uses nanoseconds. Therefore
-// we have to implement a custom UnmarshalJSON.
-type Duration struct{ time.Duration }
-
-// UnmarshalJSON loads a Toggl duration into a Go duration. Toggl durations are
-// given in seconds.
-func (d *Duration) UnmarshalJSON(data []byte) error {
-	seconds, err := strconv.ParseInt(string(data), 10, 64)
-	if err != nil {
-		fmt.Errorf("Couldn't unmarshal toggl.Duration: %v\n", err)
-	}
-	d.Duration = time.Duration(seconds * int64(time.Second))
-	return nil
-}
-
 // TimeEntry contains the data returned for a single time entry.
 type TimeEntry struct {
-	Id          int
 	Description string
-	WorkspaceId int `json:"wid"`
 	ProjectId   int `json:"pid"`
-	Guid        string
-	Billable    bool
 	Start       time.Time
-	Stop        time.Time
-	Duration    Duration
-	DurOnly     bool
-	UserId      int    `json:"uid"`
-	CreatedWith string `json:"created_with"`
+	Duration    time.Duration
 	Tags        []string
-	At          string
+}
+
+type Me struct {
+	Id          int
+	DefaultWorkspaceId int `json:"default_workspace_id"`
 }
 
 // TimeEntryResponse is a wrapper for the data returned by /time_entries
@@ -69,29 +50,108 @@ type TimeEntriesService struct {
 	client *Client
 }
 
-// Get returns details of a single time entry
-func (tes *TimeEntriesService) Get(id int) (TimeEntry, error) {
-	panic("Get() Not yet implemented")
-	return TimeEntry{}, nil
+type searchRequest struct {
+        EndDate    string  `json:"end_date"`
+        StartDate  string  `json:"start_date"`
 }
 
-// Current returns running time entry
-func (tes *TimeEntriesService) Current() (TimeEntry, error) {
-	panic("Current() not yet implemented")
-	return TimeEntry{}, nil
+type searchTimeEntry struct {
+	Description string
+	ProjectId   int `json:"project_id"`
+	Billable    bool
+	Start       time.Time
+	TagIds      []int `json:"tag_ids"`
+        TimeEntries []searchTimeEntryDetail `json:"time_entries"`
 }
+
+type searchTimeEntryDetail struct {
+	Start       time.Time
+	Seconds   int `json:"seconds"`
+}
+
+type TagItem struct {
+	Id int `json:"id"`
+	Name string `json:"name"`
+} 
 
 // Range returns time entries started in a specific time range. Only the first
 // 1000 found time entries are returned. There is no pagination.
 func (tes *TimeEntriesService) Range(start, end time.Time) ([]TimeEntry, error) {
-	timeEntries := []TimeEntry{}
-	t0 := start.Format(time.RFC3339)
-	t1 := end.Format(time.RFC3339)
-	path := fmt.Sprintf("me/time_entries?start_date=%s&end_date=%s", t0, t1)
-	err := tes.client.GET(path, &timeEntries)
+        // On récupère le workspace par défaut
+        me := Me{}
+	pathMe := fmt.Sprintf("me")
+	errMe := tes.client.GET(pathMe, &me)
+	if errMe != nil {
+		return nil, fmt.Errorf("Couldn't get me: %v\n", errMe)
+	}
+
+        fmt.Println(fmt.Sprintf("Default workspace ID found : %d", me.DefaultWorkspaceId))
+
+
+        // on liste tous les ids
+        allTags := []TagItem{}
+        errTags := tes.client.GET(fmt.Sprintf("workspaces/%d/tags", me.DefaultWorkspaceId), &allTags)
+	if errTags != nil {
+		return nil, fmt.Errorf("Couldn't get tags: %v\n", errTags)
+	}
+
+        // on prépare le body pour récupérer les time entries
+        aa := searchRequest{
+                EndDate: end.Format("2006-01-02"),
+                StartDate: start.Format("2006-01-02"),
+        }
+
+        s, errM := json.Marshal(aa)
+        if errM != nil {
+                return nil, errM
+
+        }
+
+        // on recherche les time entries
+	searchTimeEntries := []searchTimeEntry{}
+	path := fmt.Sprintf("workspace/%d/search/time_entries", me.DefaultWorkspaceId)
+	err := tes.client.POSTOnV3(path, strings.NewReader(string(s)), &searchTimeEntries)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't get time entries: %v\n", err)
 	}
+
+
+        // on met en forme les timeEntries
+        timeEntries := []TimeEntry{}
+
+	for _, searchTimeEntry := range searchTimeEntries {
+          te := TimeEntry{}
+
+          te.Description = searchTimeEntry.Description
+          te.ProjectId = searchTimeEntry.ProjectId
+
+	  for _, searchTimeEntryDetail := range searchTimeEntry.TimeEntries {
+             te.Start = searchTimeEntryDetail.Start
+             d, _ := time.ParseDuration(fmt.Sprintf("%ds", searchTimeEntryDetail.Seconds))
+             te.Duration = d
+          }
+
+          var tags []string
+          for _, tagId := range searchTimeEntry.TagIds {
+            var tagName string
+            for _, allTag := range allTags {
+              if (allTag.Id == tagId) {
+                tagName = allTag.Name
+              }
+            }
+            if (0 == len(tagName)) {
+              panic(fmt.Sprintf("Name not found for tag id %d", tagId))
+            }
+
+            tags = append(tags, tagName)
+          }
+
+          te.Tags = tags
+
+          timeEntries = append(timeEntries, te)
+        }
+
+
 	return timeEntries, nil
 }
 
@@ -160,13 +220,21 @@ func NewClient(apiKey string) *Client {
 	return c
 }
 
-// GET does a GET operation to the main API (not the reports API) and
-// unmarshals the result into the given interface.
 func (c *Client) GET(path string, response interface{}) error {
+        return c.genericDoRequest("GET", TogglApi, path, nil, response)
+}
+
+func (c *Client) POSTOnV3(path string, body io.Reader, response interface{}) error {
+        return c.genericDoRequest("POST", "https://api.track.toggl.com/reports/api/v3/", path, body, response)
+}
+
+func (c *Client) genericDoRequest(method string, endpoint string, path string, body io.Reader, response interface{}) error {
 	if len(path) > 0 && path[0] == '/' {
 		log.Print("Warning: Do not include / at the start of path")
 	}
-	req, _ := http.NewRequest("GET", TogglApi+path, nil)
+
+	req, _ := http.NewRequest(method, endpoint + path, body)
+
 	req.SetBasicAuth(c.ApiKey, "api_token")
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -191,64 +259,5 @@ func (c *Client) GET(path string, response interface{}) error {
 	return nil
 }
 
-/*
 
-type TogglTimeEntry struct {
-	Id          int
-	Description string
-	WorkspaceId int `json:"wid"`
-	ProjectId   int `json:"pid"`
-	Guid        string
-	Billable    bool
-	Start       time.Time
-	Stop        time.Time
-	Duration    int
-	DurOnly     bool
-	UserId      int    `json:"uid"`
-	CreatedWith string `json:"created_with"`
-	Tags        []string
-	At          string
-}
 
-type TogglTimeEntryResponse struct {
-	Data TogglTimeEntry
-}
-
-type TogglProject struct {
-	ID            int
-	GUID          string
-	WID           int
-	CID           int
-	Name          string
-	Billable      bool
-	IsPrivate     bool `json:"is_private"`
-	Active        bool
-	Template      bool
-	At            time.Time
-	CreatedAt     time.Time `json:"created_at"`
-	Color         string
-	AutoEstimates bool `json:"auto_estimates"`
-	ActualHours   int  `json:"actual_hours"`
-}
-
-type TogglProjectResponse struct {
-	Data TogglProject
-}
-
-type TogglProjectSummary struct {
-	Id int
-	// Items []???
-	Time  int // Duration in milliseconds
-	Title struct {
-		Client   string
-		Color    string
-		HexColor string `json:"hex_color"`
-		Project  string
-	}
-	// TotalCurrencies []Currency `json:"total_currencies"`
-}
-
-type TogglProjectSummariesResponse struct {
-	Data []TogglProjectSummary
-}
-*/
