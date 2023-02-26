@@ -98,7 +98,13 @@ type searchTimeEntry struct {
 type searchTimeEntryDetail struct {
 	Start       time.Time
 	Seconds   int `json:"seconds"`
+}
+
+type TagItem struct {
+	Id int `json:"id"`
+	Name string `json:"name"`
 } 
+
 
 
 // Range returns time entries started in a specific time range. Only the first
@@ -115,6 +121,14 @@ func (tes *TimeEntriesService) Range(start, end time.Time) ([]TimeEntry, error) 
         fmt.Println(fmt.Sprintf("Default workspace ID found : %d", me.DefaultWorkspaceId))
 
 
+        // on liste tous les ids
+        allTags := []TagItem{}
+        errTags := tes.client.GET(fmt.Sprintf("workspaces/%d/tags", me.DefaultWorkspaceId), &allTags)
+	if errTags != nil {
+		return nil, fmt.Errorf("Couldn't get tags: %v\n", errTags)
+	}
+
+        // on prépare le body pour récupérer les time entries
         aa := searchRequest{
                 EndDate: end.Format("2006-01-02"),
                 StartDate: start.Format("2006-01-02"),
@@ -126,43 +140,46 @@ func (tes *TimeEntriesService) Range(start, end time.Time) ([]TimeEntry, error) 
 
         }
 
-
+        // on recherche les time entries
 	searchTimeEntries := []searchTimeEntry{}
-//	t0 := start.Format(time.RFC3339)
-//	t1 := end.Format(time.RFC3339)
 	path := fmt.Sprintf("workspace/%d/search/time_entries", me.DefaultWorkspaceId)
 	err := tes.client.POST(path, strings.NewReader(string(s)), &searchTimeEntries)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't get time entries: %v\n", err)
 	}
 
-//fmt.Printf("%#v", searchTimeEntries)
 
+        // on met en forme les timeEntries
         timeEntries := []TimeEntry{}
 
 	for _, searchTimeEntry := range searchTimeEntries {
           te := TimeEntry{}
-//fmt.Printf("%#v", searchTimeEntry)
-
 
           te.Description = searchTimeEntry.Description
           te.ProjectId = searchTimeEntry.ProjectId
 
 	  for _, searchTimeEntryDetail := range searchTimeEntry.TimeEntries {
-fmt.Println(fmt.Sprintf("-----------"))
-
-
-
              te.Start = searchTimeEntryDetail.Start
-fmt.Println(fmt.Sprintf("%ds", searchTimeEntryDetail.Seconds))
              d, _ := time.ParseDuration(fmt.Sprintf("%ds", searchTimeEntryDetail.Seconds))
              te.Duration = d
           }
 
-fmt.Println(fmt.Sprintf("%#v", searchTimeEntry.TagIds))
+          var tags []string
+          for _, tagId := range searchTimeEntry.TagIds {
+            var tagName string
+            for _, allTag := range allTags {
+              if (allTag.Id == tagId) {
+                tagName = allTag.Name
+              }
+            }
+            if (0 == len(tagName)) {
+              panic(fmt.Sprintf("Name not found for tag id %d", tagId))
+            }
 
-          te.Tags = append(te.Tags, "Développement") //TODO corriger
+            tags = append(tags, tagName) //TODO corriger
+          }
 
+          te.Tags = tags
 
           timeEntries = append(timeEntries, te)
         }
